@@ -14,7 +14,7 @@
   Var1 Var2 Pass -> (if (cons? Var1)
                         (if (cons? Var2)
                             (let Var1/hd (hd Var1)
-                               (if (= 2 (hd Var1))
+                               (if (= 2 Var1/hd)
                                    (let Var1/tl (tl Var1)
                                         Var2/hd (hd Var2)
                                       (if (= 2 Var2/hd)
