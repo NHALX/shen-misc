@@ -1,4 +1,22 @@
 
+(datatype ctx
+             (dynamic (env | P)), F : Sig >> (shen.intro F Rules) : A;
+    ___________________________________________________________________________
+
+                 F : (context P Sig) >> (shen.intro F Rules) : A;
+
+
+      ______________________________________________________________________
+         (dynamic (env | P)), F : (context P (A --> B)) >> F : (A --> B);
+
+
+                                Rules : (A --> B);
+                  ______________________________________________
+                    F : (A --> B) >> (shen.intro F Rules) : C;)
+
+
+(load "misc.shen")
+
 (define references
   Stack [L|R] -> (union (references Stack L)
                         (references Stack R))
@@ -16,26 +34,25 @@
   Assoc X     -> X)
 
 (define env-let-bind
-  Env Stack Value K -> (let References (references Stack Value)
-                              Assoc      (foldl (/. B A [(@p A (gensym (protect Var))) | B]) References [])
-                              Value*     (substitute Assoc Value)
+  Env Stack Value -> (let References (references Stack Value)
+                          Assoc      (foldl (/. B A [(@p A (gensym (protect Var))) | B]) References [])
+                          Value*     (substitute Assoc Value)
 
-                            (foldl (/. B A [let (snd A) [fluid-value Env (fst A)] B])
-                                   Assoc
-                                   (K Value*)) ) )
+                        (foldl (/. B A [let (snd A) [fluid-value (fst A)] B])
+                               Assoc
+                               Value*)))
 
 (define env-let-macro-h
   Env Stack [Symbol Value | XS] -> (let Stack [Symbol | Stack]
-                                        (env-let-bind Env Stack Value
-                                                        (/. X [fluid-let Env Symbol X
-                                                                         [freeze (env-let-macro-h Env Stack XS)]])))
+                                        Value (env-let-bind Env Stack Value)
+                                      [fluid-let Symbol Value
+                                                 [freeze (env-let-macro-h Env Stack XS)]])
 
-  Env Stack [Expr] -> (env-let-bind Env Stack Expr (/. Expr* Expr*)))
+  Env Stack [Expr] -> (env-let-bind Env Stack Expr))
 
 \\ TODO: this macro doesn't deal with lambda binders correctly or direct calls to fluid-let/fluid-value
 (defmacro env-let-macro
-  [let! Env | XS] -> (env-let-macro-h Env [] XS)
-    where (variable? Env))
+  [let! | XS] -> (env-let-macro-h [value *fluid-global*] [] XS))
 
 \*
 (macroexpand
@@ -102,22 +119,69 @@
 
                              )
 
-(datatype @env-let@
-                          \\\\\\\\\\\\\\\\\\\\\\\\\\\\
+(datatype @env-freeze@
 
-                     Env : (env | Have) >> Value : A;
-                       (update Key r A Have Have*);
-                 Env : (env | Have*) >> Body : (lazy C);
-                   \\  (check-all Want (Key : A | Have*));
+                  (dynamic (env | New)) >> X : A;
+          _______________________________________________
+    (dynamic (env | _)) >> (freeze X) : (context New (lazy A));
+
+                  (dynamic (env | New)) >> X : A;
+          _______________________________________________
+               (freeze X) : (context New (lazy A));
+
+                   X : (context Want (lazy A));
+                      (check-all Want Have);
+          _______________________________________________
+            (dynamic (env | Have)) >> (inject X) : A;)
+
+
+(datatype @env-let@
+
+                         (update Key r A Have Have*);
+                     (dynamic (env | Have*)) >> Body : C;
+                _____________________________________________
+                  (- (let-body Have Key A C (freeze Body)));
+
+
+                                      !;
+                          (dynamic (env | Have)) >> Value : A;
+                        (let-body Have Key A C Body);
     ______________________________________________________________________
-       Env : (env | Have) >> (fluid-let Env Key Value Body) : C;
+               (dynamic (env | Have)) >> (fluid-let Key Value Body) : C;
+
+                                  Value : A;
+                         (let-body () Key A C Body);
+    ______________________________________________________________________
+                       (fluid-let Key Value Body) : C;
+
 
                            (env? Key r A Have);
       _________________________________________________________________
-             Env : (env | Have) >> (fluid-value Env Key) : A;
+                    (dynamic (env | Have)) >> (fluid-value Key) : A;
 
                                       )
 
+
+
+
+
+
+(datatype @env@
+
+
+           let Query (fl-query Key Domain Set)
+               (unify (just Type) Query);
+     \\            (contains? Key Domain Type Set);
+        _________________________________________
+              (env? Key Domain Type Set);
+
+                    (check-all B A);
+    _________________________________________________
+           X : (dynamic (env | A)) >> X : (dynamic (env | B));
+
+                            )
+
+\*
 
 (datatype @env-reap@
                            \\\\\\\\\\\\\\\\\\\\\\\\
@@ -157,43 +221,33 @@
 
 
                                        )
-
-(datatype @env@
-
-
-           let Query (fl-query Key Domain Set)
-               (unify (just Type) Query);
-        _________________________________________
-              (env? Key Domain Type Set);
-
-            ________________________________
-                 (env-new) : (env);
-
-                    (check-all B A);
-    _________________________________________________
-           X : (env | A) >> X : (env | B);
-
-                            )
+*\
 
 
 
 
 
 
+(set *fluid-global* (vector 4096))
+
+(define inject
+  X -> (thaw X))
 
 (define fluid-let
-  NS X Y K -> (let Stack (trap-error (get X r NS) (/. Error []))
-                 (trap-error (do (put X r [Y|Stack] NS)
-                                 (let Ret (thaw K)
-                                    (do (put X r Stack NS)
-                                        Ret)))
-                             (/. E (do
-                                    (put X r Stack NS)
-                                    (simple-error E))))))
+  X Y K -> (let NS (value *fluid-global*)
+                Stack (trap-error (get X r NS) (/. Error []))
+              (trap-error (do (put X r [Y|Stack] NS)
+                              (let Ret (thaw K)
+                                 (do (put X r Stack NS)
+                                     Ret)))
+                          (/. E (do
+                                 (put X r Stack NS)
+                                 (simple-error E))))))
 
 (define fluid-value
-  NS X -> (head (get X r NS)))
+  X -> (head (get X r (value *fluid-global*))))
 
+\*
 (define state-value
   NS X -> (get X rw NS))
 
@@ -217,16 +271,12 @@
                            (/. E (do
                                   (put X w Old NS)
                                   (simple-error E))))))
-
-(define env-new
-  -> (vector 128))
-
-
+*\
 
 (tc +)
 
 \\\\\\\\\\\\\ tests
-
+\*
 (define test
   { (env) --> ((list number) * string) }
 
@@ -249,18 +299,46 @@
 
 (test2 (env-new))
 
+(lambda E (let E (type E (env *key1* : r A
+                              *key2* : r B))
 
+             (@p (fluid-value E *key1*)
+                 (fluid-value E *key2*))))
+*\
 
 (define test3
-  { (env *test2* : r number) --> (lazy number) --> number }
+  { (context (*test2* : r number) (lazy number)) --> number }
 
-  Env X -> (let! Env
-               *test* 1
-               *test2* (+ 1 *test*)
-             (thaw X)))
+  X -> (let!
+           *test* 1
+           *test2* (+ 1 *test*)
+         (inject X)) )
 
 
-(let Env (env-new)
-   (fluid-let Env
-              *test2* 0
-              (freeze (test3 Env (freeze (fluid-value Env *test2* ))))))
+(define test4
+  { context (*test2* : r number) (number --> number) }
+
+  N -> (+ N (fluid-value *test2*)) )
+
+(let! *test* 1 *test*)
+
+(fluid-let *test* 1
+           (freeze (fluid-value *test*)))
+
+
+(fluid-let *test2* 10
+           (freeze (test4 1)))
+
+
+(let X (type (freeze (fluid-value *test2*))
+             (context (*test2* : r number) (lazy number)))
+
+   (fluid-let *test2* 0
+              (freeze (test3 X))))
+
+
+(let X (type (freeze (fluid-value *test2*))
+             (context (*test2* : r string) (lazy string)))
+
+   (fluid-let *test2* 0
+              (freeze (test3 X))))
